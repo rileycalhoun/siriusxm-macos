@@ -49,7 +49,7 @@ struct FixtureHygieneTests {
     @Test("the hygiene patterns still match known-bad samples")
     func patternsAreEffective() throws {
         let badToken = "aBcDeFgHiJkLmNoPqRsTuVwXyZ0123+/ab"
-        let badUUID = "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+        let badUUID = "deadbeef-cafe-babe-f00d-000000000000"
         let badHost = "api.edge-gateway.example.com"
         let badQuery = "https://example.invalid/a?token=1"
 
