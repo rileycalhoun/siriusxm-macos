@@ -1,0 +1,27 @@
+{
+  "id": "3ffd3d19",
+  "baseDir": "/projects/siriusxm-macos/siriusxm-macos",
+  "name": "Brainstorm native SiriusXM app design",
+  "archived": false,
+  "aiderTotalCost": 0,
+  "agentTotalCost": 0,
+  "mainModel": "",
+  "currentMode": "agent",
+  "weakModelLocked": false,
+  "parentId": null,
+  "lastAgentProviderMetadata": {
+    "openai-compatible": {}
+  },
+  "agentProfileId": "af40775d-a5b2-49e5-965b-97aaa61fcb97",
+  "provider": "oc-shim",
+  "model": "space-bunny-free",
+  "workingMode": "local",
+  "autonomyMode": "autonomous",
+  "updatedAt": "2026-10-05T19:35:48.835Z",
+  "createdAt": "2026-10-05T19:10:27.905Z",
+  "startedAt": "2026-10-05T19:34:54.683Z",
+  "state": "MORE_INFO_NEEDED",
+  "pinned": true,
+  "interruptedAt": "2026-10-05T19:34:22.459Z",
+  "completedAt": "2026-10-05T19:35:48.835Z"
+}
