@@ -83,6 +83,11 @@ public final class BoundedSessionRefresher: @unchecked Sendable {
     /// caller always ends up with something usable or with an error, never
     /// with the same session it started with and no signal that anything went
     /// wrong.
+    ///
+    /// The fallback carries no expiry signal on purpose. Nothing expired here;
+    /// a renewal was asked for and refused. Handing the provider a fabricated
+    /// `.clockExpired` would have it re-authenticate against a story that never
+    /// happened, and the two generations treat those signals differently.
     public func renew(_ session: SessionMaterial) async throws -> SessionMaterial {
         try await flight.run { [self] in
             var renewed: SessionMaterial?
@@ -96,7 +101,7 @@ public final class BoundedSessionRefresher: @unchecked Sendable {
                 store(renewed)
                 return renewed
             }
-            return try await acquire(signal: .clockExpired(at: clock.now))
+            return try await acquire(signal: nil)
         }
     }
 
@@ -128,24 +133,32 @@ public final class BoundedSessionRefresher: @unchecked Sendable {
                 return material
             } catch let error as CredentialError {
                 lastError = error
-                let wait = waitForRateLimit(error, attempt: attempt)
-                try await sleeper.sleep(for: wait)
+                try await waitBeforeGivingUp(attempt: attempt, error: error)
             } catch {
                 lastError = CredentialError.unavailable(detail: "provider-threw-unclassified")
-                try await sleeper.sleep(for: policy.backoff(afterAttempt: attempt))
+                try await waitBeforeGivingUp(attempt: attempt, error: nil)
             }
         }
 
         throw normalised(lastError)
     }
 
-    /// A `rateLimited` error carries the server's own instruction, which
-    /// outranks the computed backoff. Every other error uses the backoff.
-    private func waitForRateLimit(_ error: CredentialError, attempt: Int) -> Duration {
-        if case .rateLimited(let seconds) = error, let seconds {
-            return policy.delay(afterAttempt: attempt, retryAfterSeconds: seconds)
+    /// Waits before the next attempt, unless there is not going to be one.
+    ///
+    /// Two rules. A `rateLimited` error carries the server's own instruction,
+    /// which outranks the computed backoff. And the last attempt does not wait
+    /// at all: sleeping between a failure and giving up is just a slower
+    /// failure, and it would leave a human staring at a spinner the app has
+    /// already decided to stop retrying.
+    private func waitBeforeGivingUp(attempt: Int, error: (any Error)?) async throws {
+        let budget = max(1, policy.maximumAuthAttempts)
+        guard attempt < budget else { return }
+
+        if let error, case CredentialError.rateLimited(let seconds) = error, let seconds {
+            try await sleeper.sleep(for: policy.delay(afterAttempt: attempt, retryAfterSeconds: seconds))
+        } else {
+            try await sleeper.sleep(for: policy.backoff(afterAttempt: attempt))
         }
-        return policy.backoff(afterAttempt: attempt)
     }
 
     /// The budget is the last word: however the loop ended, three attempts is

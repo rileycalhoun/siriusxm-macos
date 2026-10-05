@@ -1,4 +1,5 @@
 import Foundation
+import SiriusXMCore
 
 /// The HTTP verbs this app uses. An enum rather than a string so that a
 /// typo cannot become a request.
@@ -74,7 +75,7 @@ public struct HTTPRequestSpec: Sendable, Hashable {
     /// A `RedactingURL`, not a `URL`. SiriusXM media requests carry the token
     /// in the query string, so the type that holds a request URL is the type
     /// that has to be safe to print in an array of pending requests.
-    public let url: SiriusXMCore.RedactingURL
+    public let url: RedactingURL
     public let headers: [HTTPHeader]
     public let body: Data?
     /// Overrides the session default for this one request.
@@ -82,7 +83,7 @@ public struct HTTPRequestSpec: Sendable, Hashable {
 
     public init(
         method: HTTPMethod,
-        url: SiriusXMCore.RedactingURL,
+        url: RedactingURL,
         headers: [HTTPHeader] = [],
         body: Data? = nil,
         timeout: TimeInterval? = nil

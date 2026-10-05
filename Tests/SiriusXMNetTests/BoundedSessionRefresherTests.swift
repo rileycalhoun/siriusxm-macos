@@ -43,7 +43,10 @@ struct BoundedSessionRefresherTests {
 
     @Test("an expiry signal goes to reauthenticate, not to acquire")
     func expiryUsesReauthenticate() async throws {
-        let provider = StubCredentialProvider(outcomes: [.success(.testFresh(token: "second"))])
+        let provider = StubCredentialProvider(outcomes: [
+            .success(.testFresh(token: "first")),
+            .success(.testFresh(token: "second"))
+        ])
         let subject = refresher(provider: provider)
 
         _ = try await subject.session()
@@ -80,7 +83,7 @@ struct BoundedSessionRefresherTests {
         }
 
         #expect(provider.totalCalls == 3)
-        #expect(sleeper.delays == [.milliseconds(500), .seconds(1), .seconds(2)])
+        #expect(sleeper.delays == [.milliseconds(500), .seconds(1)])
     }
 
     @Test("the budget is the last word even when the provider asks for more")
@@ -114,7 +117,7 @@ struct BoundedSessionRefresherTests {
             _ = try await subject.session()
         }
 
-        #expect(sleeper.delays == [.seconds(12), .seconds(12), .seconds(12)])
+        #expect(sleeper.delays == [.seconds(12), .seconds(12)])
     }
 
     @Test("a session with no expiry is treated as usable")

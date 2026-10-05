@@ -21,13 +21,15 @@ public protocol HTTPTransport: Sendable {
 /// credentialed request to another host is a credential-exfiltration bug, and
 /// the transport has no way to know which hosts the user already trusts.
 public final class URLSessionTransport: NSObject, HTTPTransport, URLSessionTaskDelegate, @unchecked Sendable {
-    private let session: URLSession
+    private let configuration: URLSessionConfiguration
 
-    public override convenience init() {
-        self.init(configuration: .ephemeral)
-    }
+    /// Built lazily because the delegate is `self`, and a subclass cannot
+    /// pass `self` to `URLSession` before `super.init()` has run.
+    private lazy var session: URLSession = {
+        URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }()
 
-    public init(configuration: URLSessionConfiguration) {
+    public init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.httpCookieStorage = nil
         configuration.httpCookieAcceptPolicy = .never
         configuration.httpShouldSetCookies = false
@@ -36,7 +38,7 @@ public final class URLSessionTransport: NSObject, HTTPTransport, URLSessionTaskD
         configuration.urlCredentialStorage = nil
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 30
-        self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        self.configuration = configuration
         super.init()
     }
 
@@ -189,8 +191,7 @@ public enum SetCookieHeaderParser {
 
         let nameStart = cursor
         while cursor < header.endIndex, header[cursor] != "=", header[cursor] != ";" {
-            cursor = header.index(after: index)
-            if cursor > header.endIndex { break }
+            cursor = header.index(after: cursor)
         }
 
         // No `=` before the end of the header means this comma belonged to

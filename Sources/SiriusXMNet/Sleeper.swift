@@ -45,7 +45,7 @@ public struct DispatchSleeper: Sleeper {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                 let timer = DispatchSource.makeTimerSource(queue: queue)
-                timer.schedule(deadline: .now() + .nanoseconds(nanoseconds))
+                timer.schedule(deadline: .now() + .nanoseconds(Int(clamping: nanoseconds)))
                 timer.setEventHandler {
                     timer.cancel()
                     box.finish { continuation.resume() }
@@ -70,18 +70,28 @@ public struct ImmediateSleeper: Sleeper {
     }
 }
 
-/// Holds the timer so the cancellation handler can cancel it.
+/// Holds the timer so the cancellation handler can cancel it, and so that the
+/// continuation is resumed exactly once whichever of cancel and finish arrives
+/// first.
 ///
 /// `NSLock` rather than `Synchronization.Mutex`, which is macOS 15 and this
 /// package deploys to macOS 14.
 private final class CancellationBox: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelWork: (() -> Void)?
-    private var isFinished = false
+    private var isResolved = false
+    private var cancelRequested = false
 
+    /// Called once the timer exists. If cancellation already arrived, the work
+    /// runs immediately instead of being stored.
     func install(_ work: @escaping () -> Void) {
         lock.lock()
-        if isFinished {
+        if isResolved {
+            lock.unlock()
+            return
+        }
+        if cancelRequested {
+            isResolved = true
             lock.unlock()
             work()
             return
@@ -92,21 +102,24 @@ private final class CancellationBox: @unchecked Sendable {
 
     func cancel() {
         lock.lock()
-        let work = cancelWork
-        cancelWork = nil
-        lock.unlock()
-        work?()
-    }
-
-    /// Runs `body` at most once, whichever of cancel and finish gets there
-    /// first, so a continuation is never resumed twice.
-    func finish(_ body: () -> Void) {
-        lock.lock()
-        if isFinished {
+        cancelRequested = true
+        guard !isResolved, let work = cancelWork else {
             lock.unlock()
             return
         }
-        isFinished = true
+        isResolved = true
+        cancelWork = nil
+        lock.unlock()
+        work()
+    }
+
+    func finish(_ body: () -> Void) {
+        lock.lock()
+        if isResolved {
+            lock.unlock()
+            return
+        }
+        isResolved = true
         cancelWork = nil
         lock.unlock()
         body()

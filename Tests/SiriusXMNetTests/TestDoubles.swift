@@ -19,24 +19,28 @@ final class ScriptedTransport: HTTPTransport, @unchecked Sendable {
     }
 
     var sentRequests: [HTTPRequestSpec] {
-        lock.lock()
-        defer { lock.unlock() }
-        return recorded
+        withLock { recorded }
     }
 
     var sendCount: Int { sentRequests.count }
 
     func send(_ request: HTTPRequestSpec) async throws -> HTTPResponsePayload {
-        lock.lock()
-        recorded.append(request)
-        let next = outcomes.isEmpty ? nil : outcomes.removeFirst()
-        lock.unlock()
+        let next = withLock {
+            recorded.append(request)
+            return outcomes.isEmpty ? nil : outcomes.removeFirst()
+        }
 
         guard let next else { throw TransportError.unclassified(code: -2) }
         switch next {
         case .response(let response): return response
         case .failure(let error): throw error
         }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 
@@ -52,9 +56,13 @@ final class RecordingSleeper: Sleeper, @unchecked Sendable {
     }
 
     func sleep(for interval: Duration) async throws {
+        withLock { recorded.append(interval) }
+    }
+
+    private func withLock(_ body: () -> Void) {
         lock.lock()
-        recorded.append(interval)
-        lock.unlock()
+        defer { lock.unlock() }
+        body()
     }
 }
 
@@ -88,9 +96,7 @@ final class StubCredentialProvider: CredentialProvider, @unchecked Sendable {
     }
 
     var callCounts: (acquire: Int, reauthenticate: Int, refresh: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (acquireCalls, reauthenticateCalls, refreshCalls)
+        withLock { (acquireCalls, reauthenticateCalls, refreshCalls) }
     }
 
     var totalCalls: Int {
@@ -99,37 +105,43 @@ final class StubCredentialProvider: CredentialProvider, @unchecked Sendable {
     }
 
     var recordedSignals: [SessionExpirySignal] {
-        lock.lock()
-        defer { lock.unlock() }
-        return signals
+        withLock { signals }
     }
 
     func acquire() async throws -> SessionMaterial {
-        lock.lock()
-        acquireCalls += 1
-        let next = outcomes.isEmpty ? nil : outcomes.removeFirst()
-        lock.unlock()
+        let next = withLock {
+            acquireCalls += 1
+            return outcomes.isEmpty ? nil : outcomes.removeFirst()
+        }
         guard let next else { throw CredentialError.unavailable(detail: "script-exhausted") }
         return try resolve(next)
     }
 
     func reauthenticate(after signal: SessionExpirySignal) async throws -> SessionMaterial {
-        lock.lock()
-        reauthenticateCalls += 1
-        signals.append(signal)
-        let next = outcomes.isEmpty ? nil : outcomes.removeFirst()
-        lock.unlock()
+        let next = withLock {
+            reauthenticateCalls += 1
+            signals.append(signal)
+            return outcomes.isEmpty ? nil : outcomes.removeFirst()
+        }
         guard let next else { throw CredentialError.unavailable(detail: "script-exhausted") }
         return try resolve(next)
     }
 
     func refresh(_ session: SessionMaterial) async throws -> SessionMaterial {
-        lock.lock()
-        refreshCalls += 1
-        let next = outcomes.isEmpty ? nil : outcomes.removeFirst()
-        lock.unlock()
+        let next = withLock {
+            refreshCalls += 1
+            return outcomes.isEmpty ? nil : outcomes.removeFirst()
+        }
         guard let next else { throw CredentialError.unavailable(detail: "script-exhausted") }
         return try resolve(next)
+    }
+
+    /// `NSLock` is unavailable from an async context, so the locked region is
+    /// a synchronous function called from one.
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 
     private func resolve(_ outcome: Outcome) throws -> SessionMaterial {

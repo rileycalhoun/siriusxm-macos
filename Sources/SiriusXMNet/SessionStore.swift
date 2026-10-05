@@ -47,30 +47,37 @@ struct StoredSessionPayload: Codable, Sendable {
 public final class EphemeralSessionStore: SessionStore, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: SessionMaterial?
+    private var writes = 0
 
     public init() {}
 
     /// How many times a session was written. Lets a test assert that a signed
     /// out app never wrote anything at all.
-    public private(set) var writeCount: Int = 0
+    public var writeCount: Int {
+        withLock { writes }
+    }
 
-    public func load() throws -> SessionMaterial? {
+    public func load() async throws -> SessionMaterial? {
+        withLock { stored }
+    }
+
+    public func save(_ material: SessionMaterial) async throws {
+        withLock {
+            stored = material
+            writes += 1
+        }
+    }
+
+    public func clear() async throws {
+        withLock { stored = nil }
+    }
+
+    /// `NSLock` is unavailable from an async context, so every locked region
+    /// is a synchronous function called from one.
+    private func withLock<T>(_ body: () -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
-        return stored
-    }
-
-    public func save(_ material: SessionMaterial) throws {
-        lock.lock()
-        stored = material
-        writeCount += 1
-        lock.unlock()
-    }
-
-    public func clear() throws {
-        lock.lock()
-        stored = nil
-        lock.unlock()
+        return body()
     }
 }
 
@@ -99,7 +106,7 @@ public final class KeychainSessionStore: SessionStore, @unchecked Sendable {
         self.account = account
     }
 
-    public func load() throws -> SessionMaterial? {
+    public func load() async throws -> SessionMaterial? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -117,7 +124,7 @@ public final class KeychainSessionStore: SessionStore, @unchecked Sendable {
         }
     }
 
-    public func save(_ material: SessionMaterial) throws {
+    public func save(_ material: SessionMaterial) async throws {
         let data = try encode(material)
         var query = baseQuery
         let attributes: [String: Any] = [
@@ -139,7 +146,7 @@ public final class KeychainSessionStore: SessionStore, @unchecked Sendable {
         }
     }
 
-    public func clear() throws {
+    public func clear() async throws {
         let status = SecItemDelete(baseQuery as CFDictionary)
         switch status {
         case errSecSuccess, errSecItemNotFound:

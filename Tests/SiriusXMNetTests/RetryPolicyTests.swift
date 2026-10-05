@@ -13,13 +13,15 @@ struct RetryPolicyTests {
     func budgetIsSpent() {
         let policy = RetryPolicy.default
 
-        for attempt in 1...3 {
+        // Three attempts means two waits: after the third there is nothing to
+        // wait for.
+        for attempt in 1...2 {
             let decision = policy.decide(statusCode: 500, attempt: attempt, retryAfterSeconds: nil)
             #expect(decision == .retry(after: policy.backoff(afterAttempt: attempt)))
         }
 
-        let fourth = policy.decide(statusCode: 500, attempt: 4, retryAfterSeconds: nil)
-        #expect(fourth == .stop(reason: .budgetExhausted(attempts: 4)))
+        let last = policy.decide(statusCode: 500, attempt: 3, retryAfterSeconds: nil)
+        #expect(last == .stop(reason: .budgetExhausted(attempts: 3)))
     }
 
     @Test("backoff doubles per attempt")

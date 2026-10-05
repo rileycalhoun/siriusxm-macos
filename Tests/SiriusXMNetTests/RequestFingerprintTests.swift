@@ -120,15 +120,16 @@ struct TransportRedactionTests {
 
     @Test("a response renders its shape and never its body")
     func responseRendersSafely() {
+        let body = Data(#"{"error":"\#(Self.secret)"}"#.utf8)
         let response = HTTPResponsePayload(
             statusCode: 500,
             headers: [HTTPHeader("Set-Cookie", value: "SXMAUTH=\(Self.secret)")],
-            body: Data(#"{"error":"\#(Self.secret)"}"#.utf8)
+            body: body
         )
 
         let rendered = String(describing: response)
 
-        #expect(rendered == "HTTP 500 (24 bytes, json, 1 headers)")
+        #expect(rendered == "HTTP 500 (\(body.count) bytes, json, 1 headers)")
         #expect(!rendered.contains(Self.secret))
     }
 

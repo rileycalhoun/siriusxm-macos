@@ -25,12 +25,20 @@ let package = Package(
         .target(
             name: "SiriusXMCore"
         ),
+        .target(
+            name: "SiriusXMNet",
+            dependencies: ["SiriusXMCore"]
+        ),
         .executableTarget(
             name: "SiriusXMProbe"
         ),
         .testTarget(
             name: "SiriusXMCoreTests",
             dependencies: ["SiriusXMCore"]
+        ),
+        .testTarget(
+            name: "SiriusXMNetTests",
+            dependencies: ["SiriusXMNet"]
         ),
         .testTarget(
             name: "SiriusXMProbeTests",

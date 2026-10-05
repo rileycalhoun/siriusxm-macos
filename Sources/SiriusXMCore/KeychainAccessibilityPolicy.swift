@@ -46,12 +46,12 @@ public enum KeychainAccessibilityPolicy: Sendable, Hashable {
 /// and not on the Security framework.
 public protocol SessionStore: Sendable {
     /// Returns the stored session, or `nil` when there is none.
-    func load() async -> SessionMaterial?
+    func load() async throws -> SessionMaterial?
 
     /// Replaces the stored session.
     func save(_ session: SessionMaterial) async throws
 
     /// Removes the stored session. Called when a session is rejected, not only
     /// when the user signs out, so a bad session never becomes sticky.
-    func clear() async
+    func clear() async throws
 }

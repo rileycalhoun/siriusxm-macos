@@ -39,7 +39,7 @@ struct SingleFlightTests {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for _ in 0..<4 {
                     group.addTask {
-                        try await flight.run {
+                        _ = try await flight.run {
                             await runs.increment()
                             throw Failure.sentinel
                         }

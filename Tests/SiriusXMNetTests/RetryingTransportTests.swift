@@ -21,7 +21,7 @@ struct RetryingTransportTests {
         }
 
         #expect(base.sendCount == 3)
-        #expect(sleeper.delays == [.milliseconds(500), .seconds(1), .seconds(2)])
+        #expect(sleeper.delays == [.milliseconds(500), .seconds(1)])
     }
 
     @Test("a 503 that turns into a 200 stops retrying")
@@ -59,7 +59,9 @@ struct RetryingTransportTests {
         let base = ScriptedTransport([.response(HTTPResponsePayload(statusCode: 404))])
         let subject = RetryingTransport(base: base, sleeper: RecordingSleeper())
 
-        #expect(try await subject.send(Self.request).statusCode == 404)
+        let response = try await subject.send(Self.request)
+
+        #expect(response.statusCode == 404)
         #expect(base.sendCount == 1)
     }
 
@@ -74,7 +76,7 @@ struct RetryingTransportTests {
         }
 
         #expect(base.sendCount == 3)
-        #expect(sleeper.delays.count == 3)
+        #expect(sleeper.delays == [.milliseconds(500), .seconds(1)])
     }
 
     @Test("a TLS failure is not retried")
@@ -100,7 +102,7 @@ struct RetryingTransportTests {
     }
 
     @Test("a 429 waits for exactly what the server asked for")
-    func retryAfterIsRespected() async {
+    func retryAfterIsRespected() async throws {
         let base = ScriptedTransport([
             .response(HTTPResponsePayload(statusCode: 429, headers: [HTTPHeader("Retry-After", value: "7")])),
             .response(HTTPResponsePayload(statusCode: 200))
@@ -108,7 +110,9 @@ struct RetryingTransportTests {
         let sleeper = RecordingSleeper()
         let subject = RetryingTransport(base: base, policy: .default, sleeper: sleeper)
 
-        #expect(try await subject.send(Self.request).statusCode == 200)
+        let response = try await subject.send(Self.request)
+
+        #expect(response.statusCode == 200)
         #expect(sleeper.delays == [.seconds(7)])
     }
 

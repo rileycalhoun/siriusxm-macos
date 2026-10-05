@@ -33,25 +33,37 @@ public final class SingleFlight<Value: Sendable>: @unchecked Sendable {
     /// one, which is the correct behaviour for a refresh that must happen
     /// again the next time a session expires.
     public func run(_ operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        switch begin(operation) {
+        case .joined(let task):
+            return try await task.value
+        case .started(let task, let generation):
+            do {
+                let value = try await task.value
+                clear(generation)
+                return value
+            } catch {
+                clear(generation)
+                throw error
+            }
+        }
+    }
+
+    /// Decides, under the lock, whether this caller starts the work or joins
+    /// it. Split out of `run` because `NSLock` is unavailable from an async
+    /// context and a lock held across a suspension is a deadlock anyway.
+    private func begin(_ operation: @escaping @Sendable () async throws -> Value) -> Flight {
         lock.lock()
         if let existing = current {
             lock.unlock()
-            return try await existing.value
+            return .joined(existing)
         }
         nextGeneration += 1
         let generation = nextGeneration
+        currentGeneration = generation
         let task = Task<Value, any Error> { try await operation() }
         current = task
         lock.unlock()
-
-        do {
-            let value = try await task.value
-            clear(generation)
-            return value
-        } catch {
-            clear(generation)
-            throw error
-        }
+        return .started(task, generation: generation)
     }
 
     private func clear(_ generation: UInt64) {
@@ -60,5 +72,10 @@ public final class SingleFlight<Value: Sendable>: @unchecked Sendable {
             current = nil
         }
         lock.unlock()
+    }
+
+    private enum Flight {
+        case joined(Task<Value, any Error>)
+        case started(Task<Value, any Error>, generation: UInt64)
     }
 }
