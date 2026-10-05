@@ -29,7 +29,9 @@ playground.xcworkspace
 # hence it is not needed unless you have added a package configuration file to your project
 # .swiftpm
 
-.build/
+# Matches .build plus any variant scratch path (e.g. .build-verify) used for a
+# from-scratch compile check.
+.build*/
 
 # CocoaPods
 #
