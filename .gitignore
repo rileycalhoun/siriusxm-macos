@@ -60,3 +60,11 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Agent transcripts
+#
+# .aider-desk/ holds per-task transcripts with UUIDs and full conversation
+# text, and .aider.input.history holds the raw prompt history. None of it is
+# source. Untracked so it cannot leak into git history or a pull request.
+.aider-desk/
+.aider.input.history
