@@ -29,8 +29,13 @@ let package = Package(
             name: "SiriusXMNet",
             dependencies: ["SiriusXMCore"]
         ),
+        .target(
+            name: "SiriusXMProtocol",
+            dependencies: ["SiriusXMCore", "SiriusXMNet"]
+        ),
         .executableTarget(
-            name: "SiriusXMProbe"
+            name: "SiriusXMProbe",
+            dependencies: ["SiriusXMCore", "SiriusXMNet", "SiriusXMProtocol"]
         ),
         .testTarget(
             name: "SiriusXMCoreTests",
@@ -39,6 +44,10 @@ let package = Package(
         .testTarget(
             name: "SiriusXMNetTests",
             dependencies: ["SiriusXMNet"]
+        ),
+        .testTarget(
+            name: "SiriusXMProtocolTests",
+            dependencies: ["SiriusXMProtocol"]
         ),
         .testTarget(
             name: "SiriusXMProbeTests",
