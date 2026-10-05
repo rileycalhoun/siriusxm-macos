@@ -11,6 +11,11 @@ let package = Package(
         .executableTarget(
             name: "SiriusXMProbe"
         ),
+        .testTarget(
+            name: "SiriusXMProbeTests",
+            dependencies: ["SiriusXMProbe"],
+            resources: [.copy("Fixtures")]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

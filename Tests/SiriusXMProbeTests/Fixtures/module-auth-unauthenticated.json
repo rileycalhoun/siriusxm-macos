@@ -1,0 +1,12 @@
+{
+  "_fixture": "module API response shape when no standardAuth block is sent. Shape observed live 2026-10-12. Values synthetic.",
+  "ModuleListResponse": {
+    "messages": [
+      {
+        "message": "Bad username/password",
+        "code": 101
+      }
+    ],
+    "status": 0
+  }
+}

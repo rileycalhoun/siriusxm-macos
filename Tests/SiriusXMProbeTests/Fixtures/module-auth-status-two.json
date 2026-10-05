@@ -1,0 +1,12 @@
+{
+  "_fixture": "synthetic response with a status value outside the 0 and 1 range.",
+  "ModuleListResponse": {
+    "messages": [
+      {
+        "message": "Unexpected status value",
+        "code": 0
+      }
+    ],
+    "status": 2
+  }
+}

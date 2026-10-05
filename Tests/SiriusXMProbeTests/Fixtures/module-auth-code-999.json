@@ -1,0 +1,12 @@
+{
+  "_fixture": "synthetic response carrying a message code the probe has no mapping for.",
+  "ModuleListResponse": {
+    "messages": [
+      {
+        "message": "Unmapped synthetic code",
+        "code": 999
+      }
+    ],
+    "status": 0
+  }
+}

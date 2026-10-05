@@ -1,0 +1,1 @@
+AWSALB=syn-alb; Path=/; Expires=Mon, 12 Oct 2026 07:28:00 GMT, SXMAUTH=syn-auth; Path=/; HttpOnly, SXMAKTOKEN=w=syn-ak,x=1; Path=/, SXMDATA=%7B%22gupId%22%3A%22syn-gupid%22%7D; Path=/, JSESSIONID=syn-js; Path=/; HttpOnly

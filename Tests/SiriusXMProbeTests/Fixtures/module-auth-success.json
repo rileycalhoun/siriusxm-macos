@@ -1,0 +1,12 @@
+{
+  "_fixture": "hypothetical authenticated module API response. Never observed live. Synthetic.",
+  "ModuleListResponse": {
+    "messages": [
+      {
+        "message": "Success",
+        "code": 100
+      }
+    ],
+    "status": 1
+  }
+}

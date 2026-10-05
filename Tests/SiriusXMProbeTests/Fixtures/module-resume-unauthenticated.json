@@ -1,0 +1,12 @@
+{
+  "_fixture": "module API resume response with no session cookies. Shape observed live 2026-10-12. Values synthetic.",
+  "ModuleListResponse": {
+    "messages": [
+      {
+        "message": "Authentication Required-OpenAccess:NotEnabled",
+        "code": 201
+      }
+    ],
+    "status": 0
+  }
+}

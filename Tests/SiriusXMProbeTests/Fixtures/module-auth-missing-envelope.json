@@ -1,0 +1,6 @@
+{
+  "_fixture": "valid JSON that is not a module API envelope at all.",
+  "unexpected": {
+    "status": 1
+  }
+}

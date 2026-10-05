@@ -1,0 +1,12 @@
+{
+  "_fixture": "synthetic expired-session response using message code 208.",
+  "ModuleListResponse": {
+    "messages": [
+      {
+        "message": "Session expired",
+        "code": 208
+      }
+    ],
+    "status": 0
+  }
+}
