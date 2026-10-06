@@ -272,6 +272,95 @@ struct RetryingTransportTests {
         }
     }
 
+    @Test("each failure reason maps to its own error, never onto a shared fallback")
+    func failureReasonsMapToDistinctErrors() async {
+        let fingerprint = RequestFingerprint.of(Self.request)
+
+        let spent = await caughtError(
+            ScriptedTransport(Array(repeating: .response(HTTPResponsePayload(statusCode: 500)), count: 5))
+        )
+        let cancelled = await caughtError(ScriptedTransport([.failure(.cancelled)]))
+        let unrecoverable = await caughtError(ScriptedTransport([.failure(.tlsFailure)]))
+
+        guard let spent, let cancelled, let unrecoverable else {
+            Issue.record("expected all three to throw a TransportPolicyError")
+            return
+        }
+        #expect(spent == .budgetExhausted(attempts: 3, fingerprint: fingerprint))
+        #expect(cancelled == .cancelled(fingerprint: fingerprint))
+        #expect(unrecoverable == .unrecoverableTransport(reason: .tlsFailure, fingerprint: fingerprint))
+
+        // The reason `policyFailure` enumerates its cases instead of ending in
+        // a `default:`. Three reasons, three errors, and nothing shared: a
+        // shared fallback would collapse these and this would fail.
+        #expect(Set([spent, cancelled, unrecoverable]).count == 3)
+    }
+
+    @Test("no status the policy calls an answer is ever thrown instead of returned")
+    func anAnswerIsNeverThrown() async throws {
+        // The invariant behind the two unreachable arms of `policyFailure`.
+        // `.succeeded` and `.permanentStatus` both return a payload out of
+        // `send(_:)`, so neither can reach the function that turns a reason
+        // into a thrown error. Checking every status the policy can be handed
+        // proves that by observation, with nothing having to trip the
+        // precondition to find out.
+        for status in 100...599 {
+            let verdict = RetryPolicy.default.decide(statusCode: status, attempt: 3, retryAfterSeconds: nil)
+            let base = ScriptedTransport(Array(
+                repeating: .response(HTTPResponsePayload(statusCode: status)),
+                count: 5
+            ))
+            let subject = RetryingTransport(base: base, policy: .default, sleeper: RecordingSleeper())
+
+            switch verdict {
+            case .stop(reason: .succeeded), .stop(reason: .permanentStatus):
+                let response = try await subject.send(Self.request)
+                #expect(response.statusCode == status, "status \(status) was not returned as-is")
+            case .stop(reason: .budgetExhausted):
+                await #expect(throws: TransportPolicyError.self) {
+                    _ = try await subject.send(Self.request)
+                }
+            default:
+                Issue.record("the policy returned \(verdict) for status \(status) on the final attempt")
+            }
+        }
+    }
+
+    @Test("a negative Retry-After from a server falls back to the computed backoff")
+    func negativeRetryAfterFromServerFallsBackToBackoff() async throws {
+        // The payload refuses the negative value, so the policy never sees
+        // one from a server. What reaches the sleeper has to be a real wait
+        // either way, which is what the floor in `delay` is for.
+        let base = ScriptedTransport([
+            .response(HTTPResponsePayload(statusCode: 429, headers: [HTTPHeader("Retry-After", value: "-5")])),
+            .response(HTTPResponsePayload(statusCode: 200))
+        ])
+        let sleeper = RecordingSleeper()
+        let subject = RetryingTransport(base: base, policy: .default, sleeper: sleeper)
+
+        let response = try await subject.send(Self.request)
+
+        #expect(response.statusCode == 200)
+        #expect(sleeper.delays == [.milliseconds(500)])
+        for delay in sleeper.delays {
+            #expect(delay >= .zero)
+        }
+    }
+
+    /// The `TransportPolicyError` thrown for a scripted transport, or `nil`
+    /// when it returned a payload instead.
+    private func caughtError(_ base: ScriptedTransport) async -> TransportPolicyError? {
+        let subject = RetryingTransport(base: base, policy: .default, sleeper: RecordingSleeper())
+        do {
+            _ = try await subject.send(Self.request)
+            return nil
+        } catch let error as TransportPolicyError {
+            return error
+        } catch {
+            return nil
+        }
+    }
+
     private static let otherTokenRequest = HTTPRequestSpec(
         method: .post,
         url: RedactingURL(string: "https://api.example.invalid/playback?token=DIFFERENTTOKEN")!

@@ -95,7 +95,13 @@ public struct RetryPolicy: Sendable, Hashable {
     public func delay(afterAttempt attempt: Int, retryAfterSeconds: Int?) -> Duration {
         guard let retryAfterSeconds else { return backoff(afterAttempt: attempt) }
         let requested = Duration.seconds(Double(retryAfterSeconds))
-        return Duration.seconds(min(requested.seconds, maximumRetryAfter.seconds))
+        // Clamped at both ends: the ceiling above, and zero below. The
+        // ceiling is the safety bound. The floor is not — a negative value is
+        // not reachable from `HTTPResponsePayload`, which already refuses one,
+        // but `RetryPolicy` is public and a direct caller may hand it a
+        // negative `Int`. Handing back a negative `Duration` would be a way
+        // of promising a wait that cannot happen.
+        return Duration.seconds(max(0, min(requested.seconds, maximumRetryAfter.seconds)))
     }
 
     /// Decides what to do about an HTTP exchange that has already completed.

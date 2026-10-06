@@ -61,6 +61,42 @@ struct RetryPolicyTests {
         #expect(policy.delay(afterAttempt: 1, retryAfterSeconds: 0) == .zero)
     }
 
+    @Test("a negative Retry-After is floored at zero, not handed back as a negative wait")
+    func negativeRetryAfterIsFlooredAtZero() {
+        let policy = RetryPolicy(maximumRetryAfter: .seconds(60))
+
+        // Not reachable through `HTTPResponsePayload`, which already refuses
+        // a negative value. `RetryPolicy` is public, so the floor lives here
+        // rather than being assumed at the one in-repo call site.
+        for requested in [-1, -5, -3_600, Int.min] {
+            let delay = policy.delay(afterAttempt: 1, retryAfterSeconds: requested)
+            #expect(delay >= .zero, "a Retry-After of \(requested) produced \(delay)")
+            #expect(delay == .zero)
+        }
+    }
+
+    @Test("flooring the bottom does not move the top")
+    func floorDoesNotMoveTheCeiling() {
+        let policy = RetryPolicy(maximumRetryAfter: .seconds(60))
+
+        #expect(policy.delay(afterAttempt: 1, retryAfterSeconds: 60) == .seconds(60))
+        #expect(policy.delay(afterAttempt: 1, retryAfterSeconds: 61) == .seconds(60))
+        #expect(policy.delay(afterAttempt: 1, retryAfterSeconds: 86_400) == .seconds(60))
+    }
+
+    @Test("the computed backoff still stops at eight seconds")
+    func computedBackoffIsUnchanged() {
+        let policy = RetryPolicy.default
+
+        #expect(policy.maximumDelay == .seconds(8))
+        #expect(policy.backoff(afterAttempt: 1) == .milliseconds(500))
+        #expect(policy.backoff(afterAttempt: 10) == .seconds(8))
+        // No server instruction means the computed backoff, whatever the
+        // Retry-After clamp does.
+        #expect(policy.delay(afterAttempt: 10, retryAfterSeconds: nil) == .seconds(8))
+        #expect(policy.delay(afterAttempt: 1, retryAfterSeconds: nil) == .milliseconds(500))
+    }
+
     @Test("a 401 is an answer, never something to retry")
     func unauthorizedIsNeverRetried() {
         let decision = RetryPolicy.default.decide(statusCode: 401, attempt: 1, retryAfterSeconds: nil)
@@ -86,7 +122,7 @@ struct RetryPolicyTests {
     //
     // A response that has already arrived is a fact about the server. The
     // budget is a fact about how many attempts have been spent, and it must not
-    // overwrite the first one. These four tests pin that ordering down.
+    // overwrite the first one. These ten tests pin that ordering down.
 
     @Test("a 200 on the final attempt is a success, not a spent budget")
     func successOnTheFinalAttemptIsSuccess() {

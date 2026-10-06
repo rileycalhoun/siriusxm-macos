@@ -123,8 +123,24 @@ public final class RetryingTransport: HTTPTransport, @unchecked Sendable {
             // rate-limit incident that the service asked them to slow down,
             // when in fact no amount of waiting would ever have worked.
             return .unrecoverableTransport(reason: transportError, fingerprint: fingerprint)
-        default:
+        case .budgetExhausted:
             return .budgetExhausted(attempts: attempts, fingerprint: fingerprint)
+        case .succeeded, .permanentStatus:
+            // Unreachable, and deliberately not papered over. `send(_:)`
+            // returns the payload on both of these before it ever reaches
+            // this function: a 2xx is an answer the caller wants, and a
+            // permanent status is an answer only the protocol layer can
+            // interpret. Reporting either as a thrown `TransportPolicyError`
+            // would throw away a response that already arrived.
+            //
+            // There is no `default:` here on purpose. A `default` is what let
+            // a new `StopReason` compile silently and be mislabelled as a
+            // spent budget — the exact defect that adding
+            // `unrecoverableTransport` was meant to close. Enumerating every
+            // case makes the next one a compile error instead.
+            preconditionFailure(
+                "policyFailure(reason:) reached with \(reason); succeeded and permanentStatus both return in send(_:) before it is called"
+            )
         }
     }
 
