@@ -10,6 +10,13 @@ import Foundation
 /// closes those paths by rendering the scheme, host, and path and replacing
 /// everything else with `<redacted>`.
 ///
+/// That rendering list is the complete list of *description* paths, and it is
+/// not the complete list of ways to get a string out of this type. Reflection
+/// — `dump()` and `Mirror` — does not consult the description protocols at
+/// all; it walks stored properties, so it prints the private `url` in full,
+/// token and all. That path is closed by `CustomReflectable` below, which is a
+/// separate conformance for a separate reason, not a third description.
+///
 /// Three deliberate omissions:
 ///
 ///   - It is not `Codable`. Encoding is how a token-bearing URL reaches disk.
@@ -98,5 +105,25 @@ public struct RedactingURL: Sendable, Hashable, CustomStringConvertible, CustomD
             text += "#\(redaction)"
         }
         return text
+    }
+}
+
+// MARK: - Reflection
+
+extension RedactingURL: CustomReflectable {
+    /// `dump()` and `Mirror` bypass `description` and `debugDescription`
+    /// entirely and walk stored properties. Without this the private `url` is
+    /// printed verbatim, query string included, which is the one leak the two
+    /// description protocols cannot close.
+    ///
+    /// The mirror therefore carries no `URL` at all — not a redacted one, not
+    /// a partial one, none. It carries only the rendered form, which is built
+    /// part by part and already proven safe, and the flag saying whether this
+    /// URL had anything sensitive to redact in the first place.
+    public var customMirror: Mirror {
+        Mirror(self, children: [
+            "rendered": description,
+            "carriesSensitiveComponents": carriesSensitiveComponents
+        ])
     }
 }

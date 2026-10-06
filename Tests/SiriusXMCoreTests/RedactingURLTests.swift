@@ -11,6 +11,12 @@ import Testing
 /// collection, being boxed as `Optional` or `Any`, and being the member of a
 /// type whose own `debugDescription` is synthesised.
 ///
+/// Reflection is deliberately *not* on that list, and it took a second
+/// conformance (`CustomReflectable`) to close, because `dump()` and `Mirror`
+/// ignore the description protocols entirely and walk stored properties
+/// instead. The two tests under "Reflection" below cover that path; the rest
+/// of the suite covers the description protocols.
+///
 /// Each test uses a sentinel that appears nowhere else in the file, so a leak
 /// is attributed to the path under test rather than to some other coincidence.
 @Suite("Redacting URL")
@@ -39,6 +45,43 @@ struct RedactingURLTests {
 
         #expect(!rendered.contains(Self.secret))
         #expect(rendered.contains("?<redacted>"))
+    }
+
+    // MARK: - Reflection
+    //
+    // `dump()` and `Mirror` do not consult `description` or
+    // `debugDescription`. They walk stored properties, so before
+    // `CustomReflectable` existed they printed the private `url` in full.
+
+    @Test("dump() renders no token")
+    func dumpRendersNoToken() {
+        // `dump()` writes to `stderr` by default, which a test cannot read
+        // back, so it is redirected into a `TextOutputStream` sink instead.
+        var sink = ""
+        dump(Self.tokenBearing, to: &sink)
+
+        #expect(!sink.isEmpty, "expected dump() to produce output at all")
+        #expect(!sink.contains(Self.secret))
+        #expect(!sink.contains("?token="))
+    }
+
+    @Test("Mirror exposes no child carrying the token")
+    func mirrorChildrenCarryNoToken() {
+        let mirror = Mirror(reflecting: Self.tokenBearing)
+        let rendered = mirror.children
+            .map { "\($0.label ?? "-"): \($0.value)" }
+            .joined(separator: "\n")
+
+        #expect(!rendered.contains(Self.secret))
+    }
+
+    @Test("Mirror exposes no URL at all, not even a partial one")
+    func mirrorExposesNoURL() {
+        let mirror = Mirror(reflecting: Self.tokenBearing)
+
+        for child in mirror.children {
+            #expect(!(child.value is URL))
+        }
     }
 
     // MARK: - Interpolation
