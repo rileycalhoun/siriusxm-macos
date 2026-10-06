@@ -14,22 +14,35 @@ import Testing
 /// Reflection is deliberately *not* on that list, and it took a second
 /// conformance (`CustomReflectable`) to close, because `dump()` and `Mirror`
 /// ignore the description protocols entirely and walk stored properties
-/// instead. It is covered under "Reflection" below by four tests: the mirror's
-/// children, the absence of any `URL` among them, `dump()` of the value, and
-/// `dump()` of a value nested inside something else. The first two of those
-/// would pass vacuously against an empty mirror, so each one asserts that it
-/// is looking at a non-empty thing first.
+/// instead. It is covered under "Reflection" below by seven tests that inspect
+/// a real value — three that read `dump()` output, two that read the mirror's
+/// rendered children, and two that read the mirror's children as values — and
+/// by an eighth, `emptinessGuardRejectsAnEmptyMirror`, which exists only to
+/// prove that the emptiness guard those seven rely on actually rejects an empty
+/// mirror. The guard is written down once, as `mirrorVacuityReason` at the foot
+/// of this file, and each of the seven states the same check — some inline,
+/// some through that helper — before it asserts the absence of a secret.
 ///
-/// Two of the sections below are about the path rather than the query. "Path
-/// embedded credentials" runs the credential through every position a path
-/// segment can occupy and then through the same description, reflection and
-/// nesting paths the query runs through, because a path credential has to be
-/// closed on the same terms. "Ordinary URLs" is the counterweight: it exists
-/// to prove the path rule is narrow, and every case in it must render in full.
+/// That guard is not decoration. A `CustomReflectable` whose `customMirror`
+/// supplies no children yields a mirror with an empty `children` collection,
+/// and rendering zero children joins to the empty string, so "the rendering
+/// does not contain the token" is trivially true of a mirror that never
+/// reflected on anything at all. All seven therefore establish that they are
+/// looking at something non-empty before they assert the absence of a secret.
 ///
-/// Each assertion checks against a sentinel constant defined once at the top of
-/// this file, so a leak is attributed to the path under test rather than to
-/// some other coincidence.
+/// A later section is about the path rather than the query. "Path-embedded
+/// credentials" runs the credential through every position a path segment can
+/// occupy and then through the same description, reflection and nesting paths
+/// the query runs through, because a path credential has to be closed on the
+/// same terms. `ordinaryPathsRenderInFull` is the counterweight: it exists to
+/// prove the path rule is narrow, and every address in it must render in full.
+///
+/// Leak assertions are made against sentinel constants defined once at the top
+/// of this file, so a leak is attributed to the path under test rather than to
+/// some other coincidence. The classification section and the ordinary-path
+/// cases are the deliberate exception: they assert against literal inputs,
+/// because what is under test there is the rule's boundary rather than the
+/// absence of a secret.
 @Suite("Redacting URL")
 struct RedactingURLTests {
     static let secret = "SECRETTOKENVALUE"
@@ -119,11 +132,66 @@ struct RedactingURLTests {
     @Test("Mirror exposes no child carrying the token")
     func mirrorChildrenCarryNoToken() {
         let mirror = Mirror(reflecting: Self.tokenBearing)
-        let rendered = mirror.children
-            .map { "\($0.label ?? "-"): \($0.value)" }
-            .joined(separator: "\n")
+        let rendered = mirrorRendering(mirror)
 
+        // Without this the assertion below is a tautology: an empty mirror
+        // renders as the empty string, and the empty string contains no
+        // token. `mirrorVacuityReason` is the same guard the siblings use,
+        // and `emptinessGuardRejectsAnEmptyMirror` proves it bites.
+        #expect(mirrorVacuityReason(mirror, rendered: rendered) == nil,
+                "an empty mirror makes this test vacuous")
         #expect(!rendered.contains(Self.secret))
+        #expect(rendered.contains(RedactingURL.redaction))
+    }
+
+    @Test("the emptiness guard rejects an empty mirror")
+    func emptinessGuardRejectsAnEmptyMirror() {
+        // What the value under test would look like if `CustomReflectable`
+        // were removed from it: a mirror with no children at all. Every
+        // reflection test in this file is capable of passing on this value,
+        // which is exactly why they all check for it first.
+        struct ChildlessValue: CustomReflectable {
+            var customMirror: Mirror { Mirror(self, children: []) }
+        }
+
+        let emptyMirror = Mirror(reflecting: ChildlessValue())
+        let emptyRendering = mirrorRendering(emptyMirror)
+
+        // The premise, checked rather than assumed: an empty mirror really
+        // does render to nothing here.
+        #expect(emptyMirror.children.isEmpty)
+        #expect(emptyRendering.isEmpty)
+        // Which is why the absence assertion would sail through it...
+        #expect(!emptyRendering.contains(Self.secret))
+        // ...and the guard is what stops that.
+        #expect(mirrorVacuityReason(emptyMirror, rendered: emptyRendering) != nil,
+                "the guard is supposed to reject an empty mirror")
+
+        // The guard is not a blanket rejection, either: it accepts the real
+        // mirror, so it discriminates rather than simply failing.
+        let realMirror = Mirror(reflecting: Self.tokenBearing)
+        #expect(mirrorVacuityReason(realMirror, rendered: mirrorRendering(realMirror)) == nil,
+                "the guard must accept the mirror it is meant to police")
+
+        // And its middle branch is live, not dead code: given a mirror that
+        // does have children but no rendering of them, it still reports.
+        #expect(mirrorVacuityReason(realMirror, rendered: "") != nil,
+                "children that render to nothing must also be rejected")
+
+        // Finally, the guard would also reject a mirror that has children but
+        // never showed them the redacting output, which is the subtler
+        // version of the same failure — absent secrets asserted over output
+        // that was never redacted. A mirror walking the stored `URL` is
+        // exactly that, and it does carry the token.
+        struct UnredactedMirrorValue: CustomReflectable {
+            let url: URL
+            var customMirror: Mirror { Mirror(self, children: ["url": url]) }
+        }
+        let leaky = Mirror(reflecting: UnredactedMirrorValue(url: Self.tokenBearing.resolvedURL))
+        let leakyRendering = mirrorRendering(leaky)
+        #expect(leakyRendering.contains(Self.secret))
+        #expect(mirrorVacuityReason(leaky, rendered: leakyRendering) != nil,
+                "a mirror showing the raw URL must be rejected even though it is not empty")
     }
 
     @Test("Mirror exposes no child carrying a path-embedded credential")
@@ -182,6 +250,12 @@ struct RedactingURLTests {
     func interpolationInCompoundLiteralIsRedacted() {
         let rendered = "\(Self.tokenBearing) then \(Self.tokenBearing)"
 
+        // A non-emptiness guard would be useless here: the literal's own
+        // " then " survives even if `description` returns nothing, so
+        // `rendered` is never empty. What proves the interpolations went
+        // through the redacting renderer is the marker being there — twice.
+        #expect(rendered.components(separatedBy: RedactingURL.redaction).count - 1 == 2,
+                "both interpolations must have rendered the redacted form")
         #expect(!rendered.contains(Self.secret))
     }
 
@@ -197,6 +271,10 @@ struct RedactingURLTests {
 
         let handoff = Handoff(target: Self.tokenBearing)
         for rendered in [String(describing: handoff), String(reflecting: handoff)] {
+            // `Handoff()` — an empty inner rendering — would still contain no
+            // token, so the absence assertion below says nothing on its own.
+            #expect(rendered.contains(RedactingURL.redaction),
+                    "the nested value must have rendered the redacted form, not nothing")
             #expect(!rendered.contains(Self.secret))
         }
     }
@@ -210,6 +288,10 @@ struct RedactingURLTests {
 
         let playlist = Playlist(name: "late night", entry: Self.tokenBearing)
         for rendered in [String(describing: playlist), String(reflecting: playlist)] {
+            // The name survives whether or not the entry renders, so the
+            // non-empty part of this string proves nothing about redaction.
+            #expect(rendered.contains(RedactingURL.redaction),
+                    "the synthesised description must reach the redacted form")
             #expect(!rendered.contains(Self.secret))
         }
     }
@@ -221,6 +303,10 @@ struct RedactingURLTests {
         let array = [Self.tokenBearing]
 
         for rendered in [String(describing: array), String(reflecting: array)] {
+            // `[()]` still contains no token. The delimiters are always
+            // there; only the marker shows the element was really rendered.
+            #expect(rendered.contains(RedactingURL.redaction),
+                    "the element must have rendered the redacted form")
             #expect(!rendered.contains(Self.secret))
         }
     }
@@ -230,6 +316,8 @@ struct RedactingURLTests {
         let set: Set<RedactingURL> = [Self.tokenBearing]
 
         for rendered in [String(describing: set), String(reflecting: set)] {
+            #expect(rendered.contains(RedactingURL.redaction),
+                    "the element must have rendered the redacted form")
             #expect(!rendered.contains(Self.secret))
         }
     }
@@ -239,6 +327,10 @@ struct RedactingURLTests {
         let dictionary = [Self.tokenBearing: Self.tokenBearing]
 
         for rendered in [String(describing: dictionary), String(reflecting: dictionary)] {
+            // Key and value are two renderings, so both must be redacted —
+            // a dictionary leaks the token twice if it leaks it once.
+            #expect(rendered.components(separatedBy: RedactingURL.redaction).count - 1 == 2,
+                    "both the key and the value must have rendered the redacted form")
             #expect(!rendered.contains(Self.secret))
         }
     }
@@ -260,6 +352,11 @@ struct RedactingURLTests {
         let optional: RedactingURL? = Self.tokenBearing
         let rendered = String(reflecting: optional)
 
+        // `Optional()` and `Optional(nil as Any)` both contain no token, and
+        // both stay non-empty, so neither emptiness nor the wrapper catches
+        // an inner value that rendered nothing.
+        #expect(rendered.contains(RedactingURL.redaction),
+                "the wrapped value must have rendered the redacted form")
         #expect(!rendered.contains(Self.secret))
     }
 
@@ -268,6 +365,12 @@ struct RedactingURLTests {
         let erased: Any = Self.tokenBearing
         let rendered = String(reflecting: erased)
 
+        // The erasure produces the bare rendering with no wrapper text at
+        // all, so this is the one case where an empty string really is the
+        // failure and the emptiness check does apply.
+        #expect(!rendered.isEmpty, "a rendering that produced nothing guards nothing")
+        #expect(rendered.contains(RedactingURL.redaction),
+                "the erased value must have rendered the redacted form")
         #expect(!rendered.contains(Self.secret))
     }
 
@@ -285,6 +388,10 @@ struct RedactingURLTests {
     func userInfoIsRedacted() {
         let url = RedactingURL(string: "https://subscriber:\(Self.userInfoSecret)@example.invalid/a")!
 
+        // Both renderings are pinned to the redacted userinfo form. Without
+        // this, a renderer that returned "" for this URL would satisfy both
+        // absence assertions below.
+        #expect(String(describing: url) == "https://\(RedactingURL.redaction)@example.invalid/a")
         #expect(!String(describing: url).contains(Self.userInfoSecret))
         #expect(!String(reflecting: url).contains(Self.userInfoSecret))
     }
@@ -627,4 +734,48 @@ struct RedactingURLTests {
         #expect(String(describing: url) == "https://player.siriusxm.com")
         #expect(!url.carriesSensitiveComponents)
     }
+}
+
+// MARK: - The guard that keeps the reflection assertions from passing on nothing
+
+/// A mirror's children, rendered the way the tests above read them.
+///
+/// Centralised so that the rendering and the emptiness check cannot drift
+/// apart — they are the two halves of one question, which is whether there is
+/// anything here to be suspicious of at all.
+private func mirrorRendering(_ mirror: Mirror) -> String {
+    mirror.children
+        .map { "\($0.label ?? "-"): \($0.value)" }
+        .joined(separator: "\n")
+}
+
+/// Why `mirror` cannot be used as evidence that a secret is absent, or `nil`
+/// when it can.
+///
+/// Three failures are caught here, in increasing order of subtlety:
+///
+///   1. No children. A `CustomReflectable` that supplies none produces an
+///      empty mirror, which renders as the empty string, which contains no
+///      token. This is the vacuous pass.
+///   2. Children that render to nothing. Same outcome, reached without an
+///      empty collection.
+///   3. Children that never showed the redacting output. The absence
+///      assertion still passes, but it is being made over output that was
+///      never redacted in the first place, so it proves nothing.
+///
+/// This is a function returning a reason rather than an inline `#expect` for
+/// one reason: `emptinessGuardRejectsAnEmptyMirror` has to assert that this
+/// guard *fails* on a deliberately empty mirror, and an inline expectation
+/// cannot be held to that standard without failing the suite at the same time.
+private func mirrorVacuityReason(_ mirror: Mirror, rendered: String) -> String? {
+    if mirror.children.isEmpty {
+        return "an empty mirror makes this test vacuous"
+    }
+    if rendered.isEmpty {
+        return "a mirror whose children render to nothing makes this test vacuous"
+    }
+    if !rendered.contains(RedactingURL.redaction) {
+        return "a mirror that never rendered the redacted form makes this test vacuous"
+    }
+    return nil
 }
