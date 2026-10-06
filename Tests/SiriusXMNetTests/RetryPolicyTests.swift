@@ -82,6 +82,91 @@ struct RetryPolicyTests {
         #expect(RetryPolicy.default.decide(statusCode: 204, attempt: 1, retryAfterSeconds: nil) == .stop(reason: .succeeded))
     }
 
+    // MARK: - The final attempt
+    //
+    // A response that has already arrived is a fact about the server. The
+    // budget is a fact about how many attempts have been spent, and it must not
+    // overwrite the first one. These four tests pin that ordering down.
+
+    @Test("a 200 on the final attempt is a success, not a spent budget")
+    func successOnTheFinalAttemptIsSuccess() {
+        let decision = RetryPolicy.default.decide(statusCode: 200, attempt: 3, retryAfterSeconds: nil)
+
+        #expect(decision == .stop(reason: .succeeded))
+    }
+
+    @Test("a 204 on the final attempt is a success too")
+    func noContentOnTheFinalAttemptIsSuccess() {
+        let decision = RetryPolicy.default.decide(statusCode: 204, attempt: 3, retryAfterSeconds: nil)
+
+        #expect(decision == .stop(reason: .succeeded))
+    }
+
+    @Test("a 401 on the final attempt is still an answer, not a spent budget")
+    func unauthorizedOnTheFinalAttemptIsStillAnAnswer() {
+        let decision = RetryPolicy.default.decide(statusCode: 401, attempt: 3, retryAfterSeconds: nil)
+
+        #expect(decision == .stop(reason: .permanentStatus(401)))
+    }
+
+    @Test("a 403 on the final attempt is still an answer too")
+    func forbiddenOnTheFinalAttemptIsStillAnAnswer() {
+        let decision = RetryPolicy.default.decide(statusCode: 403, attempt: 3, retryAfterSeconds: nil)
+
+        #expect(decision == .stop(reason: .permanentStatus(403)))
+    }
+
+    @Test("a 500 on the final attempt is the one case that is a spent budget")
+    func serverErrorOnTheFinalAttemptIsTheBudget() {
+        let policy = RetryPolicy.default
+        let decision = policy.decide(statusCode: 500, attempt: 3, retryAfterSeconds: nil)
+
+        #expect(decision == .stop(reason: .budgetExhausted(attempts: 3)))
+        // A stop, so no delay is offered and nothing waits to retry.
+        guard case .stop = decision else {
+            Issue.record("expected a stop, got \(decision)")
+            return
+        }
+    }
+
+    @Test("a 429 before the budget is spent is still a retry")
+    func rateLimitedBeforeTheBudgetIsStillRetried() {
+        let policy = RetryPolicy.default
+        let decision = policy.decide(statusCode: 429, attempt: 2, retryAfterSeconds: 9)
+
+        #expect(decision == .retry(after: .seconds(9)))
+    }
+
+    @Test("a 429 on the final attempt is a spent budget")
+    func rateLimitedOnTheFinalAttemptIsTheBudget() {
+        let decision = RetryPolicy.default.decide(statusCode: 429, attempt: 3, retryAfterSeconds: 9)
+
+        #expect(decision == .stop(reason: .budgetExhausted(attempts: 3)))
+    }
+
+    @Test("a TLS failure on the final attempt is not a spent budget")
+    func unrecoverableOnTheFinalAttemptIsNotTheBudget() {
+        let decision = RetryPolicy.default.decide(transportError: .tlsFailure, attempt: 3)
+
+        #expect(decision == .stop(reason: .unrecoverableTransport(.tlsFailure)))
+    }
+
+    @Test("a timeout on the final attempt is a spent budget")
+    func retryableOnTheFinalAttemptIsTheBudget() {
+        let decision = RetryPolicy.default.decide(transportError: .timedOut, attempt: 3)
+
+        #expect(decision == .stop(reason: .budgetExhausted(attempts: 3)))
+    }
+
+    @Test("cancellation still wins on the final attempt")
+    func cancellationStillWinsOnTheFinalAttempt() {
+        let decision = RetryPolicy.default.decide(transportError: .cancelled, attempt: 3)
+
+        #expect(decision == .stop(reason: .cancelled))
+    }
+
+    // MARK: - Transport failures
+
     @Test("a cancelled request is never retried")
     func cancellationIsNeverRetried() {
         #expect(RetryPolicy.default.decide(transportError: .cancelled, attempt: 1) == .stop(reason: .cancelled))

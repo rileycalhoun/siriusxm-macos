@@ -103,18 +103,26 @@ public struct RetryPolicy: Sendable, Hashable {
     /// A 401 is a stop, not a retry: the caller has to re-enter the credential
     /// provider, and doing that on a timer is how an expired session turns into
     /// a burst of sign-in attempts.
+    ///
+    /// The status is read first and the budget is consulted only where another
+    /// attempt is actually being offered. A response that has already arrived
+    /// is a fact about the server, and the budget says nothing about it: if the
+    /// budget were checked first, a 200 landing on the final attempt would be
+    /// reported as a spent budget, throwing away a session the user paid for,
+    /// and a 401 would be misreported as the service being busy.
     public func decide(statusCode: Int, attempt: Int, retryAfterSeconds: Int?) -> RetryDecision {
-        if attempt >= maximumAuthAttempts {
-            return .stop(reason: .budgetExhausted(attempts: attempt))
-        }
         switch statusCode {
         case 200...299:
             return .stop(reason: .succeeded)
         case 401, 403:
             return .stop(reason: .permanentStatus(statusCode))
-        case 429:
-            return .retry(after: delay(afterAttempt: attempt, retryAfterSeconds: retryAfterSeconds))
-        case 500...599:
+        case 429, 500...599:
+            // Only a status that is asking for another attempt has any reason
+            // to look at the ceiling. A status that stops on its own terms is
+            // not out of budget, it is answered.
+            guard attempt < maximumAuthAttempts else {
+                return .stop(reason: .budgetExhausted(attempts: attempt))
+            }
             return .retry(after: delay(afterAttempt: attempt, retryAfterSeconds: retryAfterSeconds))
         default:
             return .stop(reason: .permanentStatus(statusCode))
@@ -122,15 +130,21 @@ public struct RetryPolicy: Sendable, Hashable {
     }
 
     /// Decides what to do about a transport failure that produced no response.
+    ///
+    /// Cancellation, then recoverability, then the budget, in that order. The
+    /// budget is a statement about how many attempts have been spent, and
+    /// neither "the caller stopped it" nor "this will never resolve" is a spent
+    /// budget. Reporting either as one tells the caller the service was busy,
+    /// which invites a retry of something that was never going to succeed.
     public func decide(transportError: TransportError, attempt: Int) -> RetryDecision {
         if transportError.isCancellation {
             return .stop(reason: .cancelled)
         }
-        if attempt >= maximumAuthAttempts {
-            return .stop(reason: .budgetExhausted(attempts: attempt))
-        }
         guard transportError.isWorthRetrying else {
             return .stop(reason: .unrecoverableTransport(transportError))
+        }
+        if attempt >= maximumAuthAttempts {
+            return .stop(reason: .budgetExhausted(attempts: attempt))
         }
         return .retry(after: backoff(afterAttempt: attempt))
     }
