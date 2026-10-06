@@ -302,7 +302,7 @@ source of the same family. Out of scope here; recorded only so it is not lost.
 
 ## Cleanup
 
-- Scratch worktree `/tmp/agent-shared/smx-fixes` removed after the push.
+- Scratch worktree `/tmp/agent-shared/sxm-fixes` removed after the push.
 - No build artifacts committed; `.build/` is already ignored.
 - No bulk added; the branch adds four source edits and three test files' worth of
   cases, all text.
