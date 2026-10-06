@@ -169,6 +169,109 @@ struct RetryingTransportTests {
         }
     }
 
+    // MARK: - The final attempt
+
+    @Test("a 200 arriving on the last attempt is returned, not thrown away")
+    func successOnTheLastAttemptIsReturned() async throws {
+        // The budget is three attempts, so this succeeds on the third — the
+        // attempt where the budget is also spent. A 200 is an answer to the
+        // server's question, and discarding it would throw away a session the
+        // user paid three attempts for.
+        let base = ScriptedTransport([
+            .response(HTTPResponsePayload(statusCode: 503)),
+            .response(HTTPResponsePayload(statusCode: 503)),
+            .response(HTTPResponsePayload(statusCode: 200))
+        ])
+        let sleeper = RecordingSleeper()
+        let subject = RetryingTransport(base: base, policy: .default, sleeper: sleeper)
+
+        let response = try await subject.send(Self.request)
+
+        #expect(response.statusCode == 200)
+        #expect(base.sendCount == 3)
+        #expect(sleeper.delays == [.milliseconds(500), .seconds(1)])
+    }
+
+    @Test("a 401 arriving on the last attempt is returned, not thrown away")
+    func unauthorizedOnTheLastAttemptIsReturned() async throws {
+        let base = ScriptedTransport([
+            .response(HTTPResponsePayload(statusCode: 503)),
+            .response(HTTPResponsePayload(statusCode: 503)),
+            .response(HTTPResponsePayload(statusCode: 401))
+        ])
+        let subject = RetryingTransport(base: base, policy: .default, sleeper: RecordingSleeper())
+
+        let response = try await subject.send(Self.request)
+
+        #expect(response.statusCode == 401)
+        #expect(response.isUnauthorized)
+        #expect(base.sendCount == 3)
+    }
+
+    // MARK: - Why a policy failure stopped
+
+    @Test("an unrecoverable transport failure is reported as itself, not as a spent budget")
+    func unrecoverableTransportIsNotReportedAsBudgetExhausted() async {
+        let base = ScriptedTransport([.failure(.tlsFailure)])
+        let subject = RetryingTransport(base: base, sleeper: RecordingSleeper())
+        let fingerprint = RequestFingerprint.of(Self.request)
+
+        await #expect(
+            throws: TransportPolicyError.unrecoverableTransport(reason: .tlsFailure, fingerprint: fingerprint)
+        ) {
+            _ = try await subject.send(Self.request)
+        }
+
+        #expect(base.sendCount == 1)
+    }
+
+    @Test("an unreachable host is reported as itself, not as a spent budget")
+    func unreachableHostIsNotReportedAsBudgetExhausted() async {
+        let base = ScriptedTransport([.failure(.hostUnreachable)])
+        let subject = RetryingTransport(base: base, sleeper: RecordingSleeper())
+        let fingerprint = RequestFingerprint.of(Self.request)
+
+        await #expect(
+            throws: TransportPolicyError.unrecoverableTransport(reason: .hostUnreachable, fingerprint: fingerprint)
+        ) {
+            _ = try await subject.send(Self.request)
+        }
+    }
+
+    @Test("budgetExhausted still means only that the bound was reached")
+    func budgetExhaustedMeansOnlyTheBoundWasReached() async {
+        // A timeout is worth retrying, so exhausting the budget is genuinely
+        // the reason this stopped — which is the distinction the new case
+        // exists to preserve.
+        let base = ScriptedTransport(Array(repeating: .failure(.timedOut), count: 5))
+        let subject = RetryingTransport(base: base, policy: .default, sleeper: RecordingSleeper())
+        let fingerprint = RequestFingerprint.of(Self.request)
+
+        await #expect(
+            throws: TransportPolicyError.budgetExhausted(attempts: 3, fingerprint: fingerprint)
+        ) {
+            _ = try await subject.send(Self.request)
+        }
+    }
+
+    @Test("an unrecoverable transport failure renders without a URL or a token")
+    func unrecoverableTransportRendersSafely() async {
+        let base = ScriptedTransport([.failure(.tlsFailure)])
+        let subject = RetryingTransport(base: base, sleeper: RecordingSleeper())
+
+        do {
+            _ = try await subject.send(Self.request)
+            Issue.record("expected a transport failure")
+        } catch let error as TransportPolicyError {
+            let rendered = String(describing: error)
+            #expect(!rendered.contains("SECRETTOKENVALUE"))
+            #expect(!rendered.contains("https://"))
+            #expect(rendered.contains("tls-failure"))
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+    }
+
     private static let otherTokenRequest = HTTPRequestSpec(
         method: .post,
         url: RedactingURL(string: "https://api.example.invalid/playback?token=DIFFERENTTOKEN")!

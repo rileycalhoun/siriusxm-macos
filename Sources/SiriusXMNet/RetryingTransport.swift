@@ -2,11 +2,18 @@ import Foundation
 
 /// Why the retry layer gave up on a request that never succeeded.
 public enum TransportPolicyError: Error, Sendable, Hashable, CustomStringConvertible {
-    /// The bounded budget for this request is spent.
+    /// The bounded budget for this request is spent. This means only that the
+    /// bound was reached — never that the service was busy, and never that a
+    /// request which was never going to work ran out of attempts.
     case budgetExhausted(attempts: Int, fingerprint: RequestFingerprint)
     /// The caller cancelled. Never retried, never reported as a failure of
     /// the service.
     case cancelled(fingerprint: RequestFingerprint)
+    /// The transport failed in a way that retrying cannot fix: a name that
+    /// does not resolve, a certificate that does not validate. Distinct from
+    /// a spent budget because the answer would have been the same on the first
+    /// attempt, so no number of retries would have changed it.
+    case unrecoverableTransport(reason: TransportError, fingerprint: RequestFingerprint)
 
     public var description: String {
         switch self {
@@ -14,6 +21,8 @@ public enum TransportPolicyError: Error, Sendable, Hashable, CustomStringConvert
             return "budget-exhausted(attempts: \(attempts), \(fingerprint))"
         case .cancelled(let fingerprint):
             return "cancelled(\(fingerprint))"
+        case .unrecoverableTransport(let reason, let fingerprint):
+            return "unrecoverable-transport(\(reason), \(fingerprint))"
         }
     }
 }
@@ -107,6 +116,13 @@ public final class RetryingTransport: HTTPTransport, @unchecked Sendable {
         switch reason {
         case .cancelled:
             return .cancelled(fingerprint: fingerprint)
+        case .unrecoverableTransport(let transportError):
+            // A wrong host or a bad certificate is not a spent budget. Both
+            // are stops, so nothing retries differently either way, but
+            // reporting it as a budget failure tells whoever is debugging a
+            // rate-limit incident that the service asked them to slow down,
+            // when in fact no amount of waiting would ever have worked.
+            return .unrecoverableTransport(reason: transportError, fingerprint: fingerprint)
         default:
             return .budgetExhausted(attempts: attempts, fingerprint: fingerprint)
         }
