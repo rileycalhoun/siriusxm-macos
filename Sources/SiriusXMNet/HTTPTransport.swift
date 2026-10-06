@@ -23,11 +23,32 @@ public protocol HTTPTransport: Sendable {
 public final class URLSessionTransport: NSObject, HTTPTransport, URLSessionTaskDelegate, @unchecked Sendable {
     private let configuration: URLSessionConfiguration
 
-    /// Built lazily because the delegate is `self`, and a subclass cannot
-    /// pass `self` to `URLSession` before `super.init()` has run.
-    private lazy var session: URLSession = {
-        URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-    }()
+    /// Built exactly once, under a lock, on first use.
+    ///
+    /// The delegate has to be `self`, and a class cannot pass `self` to
+    /// `URLSession` before `super.init()` has run, so the session cannot be a
+    /// stored property built during initialisation either: Swift requires a
+    /// subclass's stored properties to be initialised *before* `super.init()`,
+    /// so an eagerly assigned `let` after the superclass initialiser does not
+    /// compile.
+    ///
+    /// `lazy` does satisfy the ordering constraint and nothing else, which is
+    /// the problem. It is not thread-safe: two concurrent `send()` calls could
+    /// both run its initialiser and build two `URLSession`s, each holding
+    /// `self` as its delegate, while this type asserts `Sendable`. The lock
+    /// below is what makes the first-use construction safe, and the single
+    /// assignment under it is what guarantees there is only ever one session.
+    private let sessionLock = NSLock()
+    private var madeSession: URLSession?
+
+    private var session: URLSession {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        if let madeSession { return madeSession }
+        let created = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        madeSession = created
+        return created
+    }
 
     public init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.httpCookieStorage = nil
