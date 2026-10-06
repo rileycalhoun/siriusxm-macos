@@ -153,7 +153,7 @@ edit that reads `madeSession` outside the lock.
 `RetryDecision.StopReason` has five cases. Reachability into the `switch` at
 `RetryingTransport.swift:115-127`:
 
-- `.cancelled` — filtered out earlier at `send()` line ~84-85 (`case
+- `.cancelled` — filtered out earlier at `send()` lines ~84-85 (`case
   .stop(reason: .cancelled)` throws directly), but also mapped correctly inside
   `policyFailure`. Double-covered, correct.
 - `.unrecoverableTransport` — mapped to the new
@@ -238,12 +238,11 @@ edit that reads `madeSession` outside the lock.
 - `Sources/SiriusXMNet/HTTPTransport.swift:41-51` — `self → madeSession`, and
   `URLSession` retains its `delegate` (`self`) until invalidated. The class has
   no `deinit` (the cycle prevents it) and no `invalidateAndCancel` entry point.
-  Exactly one session can exist (the fix guarantees that), so this is a bounded
- , process-lifetime hold, not a growth leak — but it worth recording: on a
-  platform where URLSession delegate callbacks can outlive their intended
-  owner, an explicit `close()` that calls `invalidateAndCancel()` and nils
-  `madeSession` is the clean exit. Present identically under `lazy`; the fix
-  neither caused nor worsened it.
+  Exactly one session can exist (the fix guarantees that), so this is a bounded,
+  process-lifetime hold rather than a growth leak — but it is worth recording:
+  an explicit `close()` that calls `invalidateAndCancel()` and nils
+  `madeSession` under the lock is the clean exit. Present identically under
+  `lazy`; the fix neither caused nor worsened it.
 
 ### F6 — LOW (pre-existing): `init` mutates the caller's `URLSessionConfiguration` in place
 
@@ -284,10 +283,10 @@ edit that reads `madeSession` outside the lock.
   `attemptsByFingerprint` gains one permanent entry per distinct request
   fingerprint and is never pruned or reset on success. A long-lived instance
   that sends many distinct stream URLs (new token per track → new URL → but
-  token is excluded from the fingerprint, so identical tracks share one entry;
-  *distinct tracks* are distinct entries) accumulates one ~24-byte-keyed entry
-  per track. Slow growth, bounded by listening history; a `reset` on success or
-  an eviction bound would close it. Not introduced by this branch.
+  the token is excluded from the fingerprint, so identical tracks share one
+  entry; *distinct tracks* are distinct entries) accumulates one ~24-byte-keyed
+  entry per track. Slow growth, bounded by listening history; a `reset` on
+  success or an eviction bound would close it. Not introduced by this branch.
 
 ## Explicit negatives — checked, nothing found
 
